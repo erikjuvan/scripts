@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# This script sets up git repos and remotes that mirror the setup in work
+# projects. It can be used to quickly build a testing setup for experimenting 
+# with git on an actual structure of a realistic project.
+# Note: this could perhaps be setup up more nicely if we instead first
+# created bare repos and clone then, instead of doing it backwards. But
+# this way is also just fine.
+
 set -x
 
 project_dirname=local
@@ -52,6 +59,16 @@ cd $local_dir
 for dir in */; do cd $dir; git push origin main; git push origin develop; cd -; done
 for dir in */; do cd $dir; git push github main; git push github develop; cd -; done
 
+cd $local_dir/safe
+git tag v0.8.0
+git push origin --tags
+git push github --tags
+
+cd $local_dir/user
+git tag v1.0.0
+git push origin --tags
+git push github --tags
+
 # Delete all local repos and only clone release
 cd $local_dir
 rm -rf release safe user shared blackchannel simulink
@@ -81,20 +98,24 @@ git checkout main
 echo "Some safe stuff" > safe.c
 git add safe.c
 git commit -am "Add safe.c"
+git tag v1.0.0
 git checkout -b develop main
 echo "Some safe develop stuff" >> safe.c
 git add safe.c
 git commit -am "Add safe.c develop stuff"
+git tag v1.1.0-rc
 
 cd ../user
 git checkout main
 echo "Some user stuff" > user.c
 git add user.c
 git commit -am "Add user.c"
+git tag v1.1.0
 git checkout -b develop main
 echo "Some user develop stuff" >> user.c
 git add user.c
 git commit -am "Add user.c develop stuff"
+git tag v1.2.0-rc
 
 cd ../safe/submodules/shared
 git checkout main

@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# This script can be run like: sh script.sh location/of/repo
+# It will go through all the submodules and push to all remotes all the branches
+# defined in the function below. It will also push all the tags
+
 function git_push_branches_tags_to_remotes() {
     remotes=(github origin)
     branches=(develop master main)
