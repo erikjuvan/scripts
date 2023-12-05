@@ -68,7 +68,7 @@ git submodule foreach --recursive 'git fetch --all'
 # at this point we can finish the script or add some additional steps
 
 # Proceed with additional steps?
-read -n 1 -r -p "Do some additional steps[Y/n]? "
+read -n 1 -r -p "Make some commits to main and develop to make them dirty [Y/n]? "
 echo # move to a new line
 if [[ $REPLY = [Nn] ]]
 then
@@ -76,15 +76,35 @@ then
 fi
 
 # Create new commits on main and develop branch
-cd $local_dir/release
-cd safe
+cd $local_dir/release/safe
+git checkout main
 echo "Some safe stuff" > safe.c
 git add safe.c
 git commit -am "Add safe.c"
+git checkout -b develop main
+echo "Some safe develop stuff" >> safe.c
+git add safe.c
+git commit -am "Add safe.c develop stuff"
+
 cd ../user
+git checkout main
 echo "Some user stuff" > user.c
 git add user.c
 git commit -am "Add user.c"
+git checkout -b develop main
+echo "Some user develop stuff" >> user.c
+git add user.c
+git commit -am "Add user.c develop stuff"
+
+cd ../safe/submodules/shared
+git checkout main
+echo "Some shared stuff" > shared.c
+git add shared.c
+git commit -am "Add shared.c"
+git checkout -b develop main
+echo "Some shared develop stuff" >> shared.c
+git add shared.c
+git commit -am "Add shared.c develop stuff"
 
 # Done.
 echo "Git playground setup finished"

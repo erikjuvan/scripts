@@ -2,4 +2,4 @@
 */
 !.gitignore
 !setup_demo_git_project.sh
-
+!push_branches_tags_to_remotes.sh
