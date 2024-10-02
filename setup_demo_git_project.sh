@@ -7,10 +7,6 @@ set -e # Exit immediately if a pipeline (see Pipelines), which may consist of a 
 # Execute script line by line, prompting a user to press a key for each line
 # trap read debug
 
-# Move to the location of the script so it can be called from anywhere
-script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$script_dir" || exit
-
 # Move to a target directory if one is provided
 target_directory=.
 # Check if a directory argument is provided
@@ -21,20 +17,20 @@ fi
 # Change the working directory to the provided directory
 cd "$target_directory" || exit
 
-# Log the process to a file
+# Log the process to a file. Must be after above code so it is placed in target directory.
 log_file="setup.log"
 # Redirect stdout (1) and stderr (2) to both the terminal and the log file
 exec > >(tee "$log_file") 2>&1
 
 # Define directories
 project_dirname="local"
-remotes_dirname="remotes"
+remote_dirname="remote"
 base_dir=$PWD
 local_dir=$base_dir/$project_dirname
-remotes_dir=$base_dir/$remotes_dirname
+remote_dir=$base_dir/$remote_dirname
 
 # Create necessary directories
-mkdir -p "$local_dir" "$remotes_dir/origin" "$remotes_dir/github"
+mkdir -p "$local_dir" "$remote_dir/origin" "$remote_dir/github"
 
 function create_git_repo() {
     dir=$1
@@ -55,12 +51,12 @@ for dir in release safe user shared blackchannel simulink; do
 done
 
 # Create bare repos for remotes
-cd "$remotes_dir/origin"  || exit
+cd "$remote_dir/origin"  || exit
 for dir in "$local_dir"/*/; do
     git -c protocol.file.allow=always clone --bare "$dir"
 done
 
-cd "$remotes_dir/github" || exit
+cd "$remote_dir/github" || exit
 for dir in "$local_dir"/*/; do
     git -c protocol.file.allow=always clone --bare "$dir"
 done
@@ -85,8 +81,8 @@ git commit -am "Add submodules"
 function add_remotes() {
     dir=$1
     cd "$dir" || exit
-    git remote add origin "$remotes_dir/origin/$(basename "$dir").git"
-    git remote add github "$remotes_dir/github/$(basename "$dir").git"
+    git remote add origin "$remote_dir/origin/$(basename "$dir").git"
+    git remote add github "$remote_dir/github/$(basename "$dir").git"
     cd - || exit
 }
 
@@ -121,12 +117,12 @@ else
     echo "Error: Expected directories not found, aborting deletion."
     exit 1
 fi
-git -c protocol.file.allow=always clone "$remotes_dir/origin/release"
+git -c protocol.file.allow=always clone "$remote_dir/origin/release"
 cd release || exit
-git remote add github "$remotes_dir/github/release"
+git remote add github "$remote_dir/github/release"
 git -c protocol.file.allow=always submodule update --init --recursive
-export REMOTES_DIR=$remotes_dir # if not exported git submodule foreach in '' doesn't see our local variable
-git submodule foreach --recursive 'git remote add github $REMOTES_DIR/github/$(basename $path)' # Note single quotes '' are needed here to avoid expansion of expressions ($REMOTES_DIR and $path), but instead keep the whole command/string literal/as is. NOTE In the context of git submodule foreach, $path will be set by Git to the path of each submodule.
+export REMOTE_DIR=$remote_dir # if not exported git submodule foreach in '' doesn't see our local variable
+git submodule foreach --recursive 'git remote add github $REMOTE_DIR/github/$(basename $path)' # Note single quotes '' are needed here to avoid expansion of expressions ($REMOTE_DIR and $path), but instead keep the whole command/string literal/as is. NOTE In the context of git submodule foreach, $path will be set by git to the path of each submodule.
 git -c protocol.file.allow=always fetch --all
 git submodule foreach --recursive 'git -c protocol.file.allow=always fetch --all'
 
