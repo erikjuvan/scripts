@@ -1,15 +1,11 @@
 #!/bin/bash
 
-# This script sets up git repos and remotes that mirror the setup in work
-# projects. It can be used to quickly build a testing setup for experimenting 
-# with git on an actual structure of a realistic project.
-# Note: this could perhaps be setup up more nicely if we instead first
-# created bare repos and clone then, instead of doing it backwards. But
-# this way is also just fine.
-
 # https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html
 set -x # Print a trace of simple commands, for commands, case commands, select commands, and arithmetic for commands and their arguments or associated word lists after they are expanded and before they are executed.
 set -e # Exit immediately if a pipeline (see Pipelines), which may consist of a single simple command (see Simple Commands), a list (see Lists of Commands), or a compound command (see Compound Commands) returns a non-zero status.
+
+# Execute script line by line, prompting a user to press a key for each line
+# trap read debug
 
 # Move to the location of the script so it can be called from anywhere
 script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -30,88 +26,119 @@ log_file="setup.log"
 # Redirect stdout (1) and stderr (2) to both the terminal and the log file
 exec > >(tee "$log_file") 2>&1
 
-project_dirname=local
-remotes_dirname=remotes
+# Define directories
+project_dirname="local"
+remotes_dirname="remotes"
 base_dir=$PWD
 local_dir=$base_dir/$project_dirname
 remotes_dir=$base_dir/$remotes_dirname
 
-# Create basic repos
-mkdir -p "$local_dir" "${remotes_dir}"/origin "${remotes_dir}"/github
-cd "$local_dir"
-mkdir release safe user shared blackchannel simulink
-for dir in */; do cd "$dir"; git init; cd -; done
-for dir in */; do cd "$dir"; touch README; cd -; done
-for dir in */; do cd "$dir"; printf "* text=auto\n" > .gitattributes; cd -; done
-for dir in */; do cd "$dir"; git add -A; cd -; done
-for dir in */; do cd "$dir"; git checkout -b main; cd -; done
-for dir in */; do cd "$dir"; git commit -am "Initial commit"; cd -; done
-for dir in */; do cd "$dir"; git branch develop; cd -; done
+# Create necessary directories
+mkdir -p "$local_dir" "$remotes_dir/origin" "$remotes_dir/github"
 
-# Create all remotes
-cd "$remotes_dir"/origin
-for dir in "$local_dir"/*/; do git clone --bare "$dir"; done
+function create_git_repo() {
+    dir=$1
+    git init "$dir"
+    cd "$dir" || exit
+    touch README
+    printf "* text=auto\n" > .gitattributes
+    git add -A
+    git checkout -b main
+    git commit -am "Initial commit"
+    git branch develop
+    cd - || exit
+}
 
-cd "$remotes_dir"/github
-for dir in "$local_dir"/*/; do git clone --bare "$dir"; done
+# Create repos for each project
+for dir in release safe user shared blackchannel simulink; do
+    create_git_repo "$local_dir/$dir"
+done
+
+# Create bare repos for remotes
+cd "$remotes_dir/origin"  || exit
+for dir in "$local_dir"/*/; do
+    git -c protocol.file.allow=always clone --bare "$dir"
+done
+
+cd "$remotes_dir/github" || exit
+for dir in "$local_dir"/*/; do
+    git -c protocol.file.allow=always clone --bare "$dir"
+done
 
 # Add submodules to projects
-cd "$local_dir"/safe
+cd "$local_dir/safe" || exit
 git -c protocol.file.allow=always submodule add ../shared submodules/shared
 git -c protocol.file.allow=always submodule add ../blackchannel submodules/blackchannel
-git add -A; git commit -am "Add submodules"
-    
-cd "$local_dir"/user
+git commit -am "Add submodules"
+
+cd "$local_dir/user" || exit
 git -c protocol.file.allow=always submodule add ../shared submodules/shared
 git -c protocol.file.allow=always submodule add ../simulink submodules/simulink
-git add -A; git commit -am "Add submodules"
+git commit -am "Add submodules"
 
-cd "$local_dir"/release
+cd "$local_dir/release" || exit
 git -c protocol.file.allow=always submodule add ../safe safe
 git -c protocol.file.allow=always submodule add ../user user
-git add -A; git commit -am "Add submodules"
+git commit -am "Add submodules"
 
-# Add remotes to all projects
-cd "$local_dir"
-for dir in */; do cd "$dir"; git remote add origin "$remotes_dir"/origin/"${dir::-1}".git; cd -; done
-for dir in */; do cd "$dir"; git remote add github "$remotes_dir"/github/"${dir::-1}".git; cd -; done
+# Add remotes
+function add_remotes() {
+    dir=$1
+    cd "$dir" || exit
+    git remote add origin "$remotes_dir/origin/$(basename "$dir").git"
+    git remote add github "$remotes_dir/github/$(basename "$dir").git"
+    cd - || exit
+}
 
-# Push all repos to all remotes
-cd "$local_dir"
-for dir in */; do cd "$dir"; git push origin main; git push origin develop; cd -; done
-for dir in */; do cd "$dir"; git push github main; git push github develop; cd -; done
+for dir in "$local_dir"/*/; do
+    add_remotes "$dir"
+done
 
-cd "$local_dir"/safe
+# Push branches and tags
+for dir in "$local_dir"/*/; do
+    cd "$dir" || exit
+    git push origin main
+    git push origin develop
+    git push github main
+    git push github develop
+    cd - || exit
+done
+
+# Tagging specific repos
+cd "$local_dir/safe" || exit
 git tag v0.8.0
-git push origin --tags
-git push github --tags
+git push --tags
 
-cd "$local_dir"/user
+cd "$local_dir/user" || exit
 git tag v1.0.0
-git push origin --tags
-git push github --tags
+git push --tags
 
-# Delete all local repos and only clone release
-cd "$local_dir"
-rm -rf release safe user shared blackchannel simulink
-git -c protocol.file.allow=always clone "$remotes_dir"/origin/release
-cd release
-git remote add github "$remotes_dir"/github/release
+# Clean up local repos and clone release
+cd "$local_dir" || exit
+if [ -d "$local_dir/release" ]; then
+    rm -rf release safe user shared blackchannel simulink
+else
+    echo "Error: Expected directories not found, aborting deletion."
+    exit 1
+fi
+git -c protocol.file.allow=always clone "$remotes_dir/origin/release"
+cd release || exit
+git remote add github "$remotes_dir/github/release"
 git -c protocol.file.allow=always submodule update --init --recursive
-export REMOTES_DIR="$remotes_dir" # if not exported git submodule foreach in '' doesn't see our local variable
-git submodule foreach --recursive 'echo $path | cut -d / -f 2 | xargs -I{} git remote add github $REMOTES_DIR/github/{}' # Note single quotes '' are needed here to avoid expansion of expressions, but instead keep the whole command/string literal/as is.
+export REMOTES_DIR=$remotes_dir
+git submodule foreach --recursive 'git remote add github $REMOTES_DIR/github/$(basename $path)'
 git -c protocol.file.allow=always fetch --all
 git submodule foreach --recursive 'git -c protocol.file.allow=always fetch --all'
 
-# We are now in a state where project structure is same as our gorenje projects
-# at this point we can finish the script or add some additional steps
-
-# Proceed with additional steps?
+# Additional steps (commits)
 read -n 1 -r -p "Make some commits to main and develop to make them dirty [Y/n]? "
-echo # move to a new line
+echo
 if [[ $REPLY = [Yy] ]]; then
+    # Add your commit steps here...
+    echo "Adding commits to simulate changes..."
+    
     # Create new commits on main and develop branch
-    cd "$local_dir"/release/safe
+    cd "${local_dir}"/release/safe
     git checkout main
     echo "Some safe stuff" > safe.c
     git add safe.c
@@ -146,6 +173,5 @@ if [[ $REPLY = [Yy] ]]; then
     git commit -am "Add shared.c develop stuff"
 fi
 
-# Done.
 echo "Git playground setup finished"
-echo "Log file '$log_file'"
+echo "Log file $log_file"
