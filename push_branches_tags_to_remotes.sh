@@ -16,8 +16,11 @@ set -e # Exit immediately if a pipeline (see Pipelines), which may consist of a 
 temp_log_file=$(mktemp)
 exec > >(tee "$temp_log_file") 2>&1 # Redirect stdout (1) and stderr (2) to both the terminal and the log file
 
+# Log date
+date
+
 # The EXIT trap will ensure that, regardless of how the script ends, the temporary log file will be moved to the desired location. This way, we won't lose the log even if an error occurs.
-trap 'final_log_file="push.log"; mv "$temp_log_file" "$final_log_file"; echo "[INFO] Log file $PWD/$final_log_file"' EXIT
+trap 'final_log_file="${absolute_target_directory}/push.log"; mv "$temp_log_file" "$final_log_file"; echo "[INFO] Log file $final_log_file"' EXIT
 
 # Move to a target directory if one is provided
 target_directory=.
@@ -28,6 +31,9 @@ fi
 # Change the working directory to the provided directory
 cd "$target_directory" || exit
 
+# Save the absolute location of the target directory
+absolute_target_directory=$(realpath "$PWD")
+
 function git_is_clean() {
     # Check if there are any uncommitted changes or untracked files
     git diff-index --quiet HEAD -- && git diff --cached --quiet && return 0 || return 1
@@ -37,18 +43,15 @@ function git_push_branches_tags_to_remotes() {
     remotes=(github origin)
     branches=(develop master main)
 
-    # Enable debugging for this function. The global set -x at the start of the script doesn't cover this function
-    # which is called from a new bash instance called by xargs.
-    set -x
-    exec > >(tee -a "$temp_log_file") 2>&1 # Redirect stdout and stderr to the log file
+    relative_path=$(realpath -s --relative-to="$absolute_target_directory" "$PWD")
 
-    printf "[INFO] Repository: '%s'\n" "$path" # NOTE In the context of git submodule foreach, $path is set by git to the path of each submodule. Currently though this function is being called by bash through xargs, so this path is not directly from git submodule but instead from xargs calling bash and bash exporting it and then calling this function.
+    printf "[INFO] Repository: '%s'\n" "$relative_path" # NOTE In the context of git submodule foreach, $path is set by git to the path of each submodule. Currently though this function is being called by bash through xargs, so this path is not directly from git submodule but instead from xargs calling bash and bash exporting it and then calling this function.
 
     for remote in "${remotes[@]}" ; do
         for branch in "${branches[@]}" ; do
 
-            echo "[INFO] Pushing ${remote}/${branch} ..."
-
+            echo "[INFO] Pushing ${remote}/${branch}"
+            
             # if branch exists
             if [ "$(git rev-parse --verify "$branch" 2>/dev/null)" ]; then
                 # Save the current branch name
@@ -59,7 +62,7 @@ function git_push_branches_tags_to_remotes() {
                     echo "[ERROR] Not on a branch. Skipping..."
                     return 1
                 fi
-                
+
                 # Check if we have no uncommitted changes
                 if ! git_is_clean; then
                     echo "[ERROR] Uncommitted changes present. Skipping branch $branch."
@@ -78,20 +81,25 @@ function git_push_branches_tags_to_remotes() {
         # Push tags
         git -c protocol.file.allow=always push "$remote" --tags
     done
-
-    # I could disable debugging but this function is called from a new bash instance called via xargs, so it's not neccessary 
-    # even if I only wanted to debug this function.
-    # set +x
 }
 
-# Export functions so they are accessible from the new bash the gets called in xargs down below
-export -f git_push_branches_tags_to_remotes
-export -f git_is_clean
+push_branches_tags_to_all_submodules_in_reverse_order() {
+    # Get the list of submodule paths in reverse order, removing 'Entering ' prefix and quotes
+    submodule_paths=$(git submodule foreach --recursive | tac | sed -e 's/Entering //' -e "s/'//g")
+
+    # Loop over each submodule path
+    while IFS= read -r submodule_path; do
+    (
+        cd "$submodule_path" || exit
+        git_push_branches_tags_to_remotes
+    )
+    done <<< "$submodule_paths"
+}
 
 # Push branches and tags for all submodules but do it in reverse order since I think that if you try to push
 # a branch and the submodules aren't pushed the push will fail.
 echo "[INFO] 1st Push all submodule's branches and tags to remotes. Important: submodules are in reverse order!"  
-git submodule foreach --recursive | tac | sed 's/Entering//' | xargs -n 1 -P 1 bash -c 'export path="$0"; cd $0 || exit; git_push_branches_tags_to_remotes' # we are doing export path="$0"; to get the path variable in the git_push_branches_tags_to_remotes which we would otherwise get if calling the function directly via submodule foreach --recursive 'git_push_branches_tags_to_remotes'. But since we are calling it through xargs the path is not passed into the new bash process created by xargs. We could also do xargs -n 1 bash -c 'cd "$0"; git_push_branches_tags_to_remotes "$0"' and change git_push_branches_tags_to_remotes to get the path from the first argument
+push_branches_tags_to_all_submodules_in_reverse_order
 
 # Fetch all changes after the push
 echo "[INFO] Submodules 'fetch --all'"  
@@ -99,7 +107,7 @@ git submodule foreach --recursive 'git -c protocol.file.allow=always fetch --all
 
 # Run this twice in case submodule was committed in a repo that gets evaluated after another one
 echo "[INFO] 2nd Push all submodule's branches and tags to remotes. Important: submodules are in reverse order!"  
-git submodule foreach --recursive | tac | sed 's/Entering//' | xargs -n 1 -P 1 bash -c 'export path="$0"; cd $0 || exit; git_push_branches_tags_to_remotes' # see comment above for export path=$0.
+push_branches_tags_to_all_submodules_in_reverse_order
 
 # Now also push the main repo after all the submodules have been pushed
 echo "[INFO] Main repository (superproject): push all branches and tags to remotes."  
