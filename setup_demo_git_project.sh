@@ -125,8 +125,8 @@ git -c protocol.file.allow=always clone "$remotes_dir/origin/release"
 cd release || exit
 git remote add github "$remotes_dir/github/release"
 git -c protocol.file.allow=always submodule update --init --recursive
-export REMOTES_DIR=$remotes_dir
-git submodule foreach --recursive 'git remote add github $REMOTES_DIR/github/$(basename $path)'
+export REMOTES_DIR=$remotes_dir # if not exported git submodule foreach in '' doesn't see our local variable
+git submodule foreach --recursive 'git remote add github $REMOTES_DIR/github/$(basename $path)' # Note single quotes '' are needed here to avoid expansion of expressions ($REMOTES_DIR and $path), but instead keep the whole command/string literal/as is. NOTE In the context of git submodule foreach, $path will be set by Git to the path of each submodule.
 git -c protocol.file.allow=always fetch --all
 git submodule foreach --recursive 'git -c protocol.file.allow=always fetch --all'
 
