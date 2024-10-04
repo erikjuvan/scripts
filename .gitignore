@@ -1,5 +1,5 @@
 *
 */
 !.gitignore
-!setup_demo_git_project.sh
 !push_branches_tags_to_remotes.sh
+!git_sandbox_setup.sh
