@@ -32,12 +32,27 @@ remote_dir=$base_dir/$remote_dirname
 # Create necessary directories
 mkdir -p "$local_dir" "$remote_dir/origin" "$remote_dir/github"
 
+# Define what we will use for autocrlf
+# Git can handle this by auto-converting CRLF line endings into LF when you add a file to the index, and vice versa when it checks out code onto your filesystem. You can turn on this functionality with the core.autocrlf setting. If you’re on a Windows machine, set it to true — this converts LF endings into CRLF when you check out code:
+# $ git config --global core.autocrlf true
+#
+# If you’re on a Linux or macOS system that uses LF line endings, then you don’t want Git to automatically convert them when you check out files; however, if a file with CRLF endings accidentally gets introduced, then you may want Git to fix it. You can tell Git to convert CRLF to LF on commit but not the other way around by setting core.autocrlf to input:
+# $ git config --global core.autocrlf input
+#
+# This setup should leave you with CRLF endings in Windows checkouts, but LF endings on macOS and Linux systems and in the repository.
+# If you’re a Windows programmer doing a Windows-only project, then you can turn off this functionality, recording the carriage returns in the repository by setting the config value to false:
+# $ git config --global core.autocrlf false
+#
+# Since this is mainly used on MSYS, I will use the input - "linux on windows" setting. Change it if needed.   
+core_autocrlf=input
+
 function create_git_repo() {
     dir=$1
     git init "$dir"
     cd "$dir" || exit
+    git config --local core.autocrlf $core_autocrlf
     touch README
-    printf "* text=auto\n" > .gitattributes
+    echo "* text=auto" > .gitattributes
     git add -A
     git checkout -b main
     git commit -am "Initial commit"
@@ -109,7 +124,7 @@ cd "$local_dir/user" || exit
 git tag v1.0.0
 git push --tags
 
-# Clean up local repos and clone release
+# Clean up local repos
 cd "$local_dir" || exit
 if [ -d "$local_dir/release" ]; then
     rm -rf release safe user shared blackchannel simulink
@@ -117,12 +132,24 @@ else
     echo "Error: Expected directories not found, aborting deletion."
     exit 1
 fi
+
+# Clone release
 git -c protocol.file.allow=always clone "$remote_dir/origin/release"
 cd release || exit
-git remote add github "$remote_dir/github/release"
+
+# Update all submodules
 git -c protocol.file.allow=always submodule update --init --recursive
+
+# Set all autocrlf
+git config --local core.autocrlf $core_autocrlf
+git submodule foreach --recursive "git config --local core.autocrlf $core_autocrlf"
+
+# Add github remote to all repos
+git remote add github "$remote_dir/github/release"
 export REMOTE_DIR=$remote_dir # if not exported git submodule foreach in '' doesn't see our local variable
 git submodule foreach --recursive 'git remote add github $REMOTE_DIR/github/$(basename $path)' # Note single quotes '' are needed here to avoid expansion of expressions ($REMOTE_DIR and $path), but instead keep the whole command/string literal/as is. NOTE In the context of git submodule foreach, $path will be set by git to the path of each submodule.
+
+# Fetch all
 git -c protocol.file.allow=always fetch --all
 git submodule foreach --recursive 'git -c protocol.file.allow=always fetch --all'
 
