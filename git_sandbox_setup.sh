@@ -1,5 +1,51 @@
 #!/bin/bash
 
+# Create a git structure mimicking a WM project, to be used for experimenting, testing and playing in this git sandbox.
+# Usage: ./this_script.sh [folder]
+
+# Note ('fatal: transport 'file' not allowed'): Since all repos are local files, there are issues with certain commands.
+# Git restricts the use of the file:// protocol in certain commands for security reasons.
+# Direct commands seem to work, e.g. git fetch --all, but more recursive commands e.g. git submodule foreach git fetch --all fails.
+# Possible solutions:
+# - avoid recursive commands, only use direct commands in repos if possible (submodule add seems to also fail)
+# - add -c protocol.file.allow=always to commands that cause issue
+# - add git config --global protocol.file.allow always, to make changes permanent
+
+# Following are some options of steps variants. I've spent like 5 days messing with this sh**stuff.
+#
+# Option 1
+# 1. Create local repos
+# 2. Add submodules
+# 3. Create bare remotes
+# 4. Add remotes
+# 5. Push to remotes
+# 6. Delete local repos
+# 7. Clone remote release
+# 8... The rest is the same
+#
+# Option 2 - THIS
+# 1. Create bare remotes
+# 2. Create local repos
+# 3. Add remotes
+# 4. Push to remotes
+# 5. Add submodules (repo by repo)
+#   5.1 Add submodules
+#   5.2 Commit
+#   5.3 Push to remotes
+# 6. Delete local repos
+# 7. Clone remote release
+# 8... The rest is the same
+#
+# Option 3
+# 1. Create bare remotes
+# 2. Clone origin remotes to local and add github remote
+# 3. Fill with demo commits
+# 4. Add submodules
+# 5. Push to remotes
+# 6. Delete local repos
+# 7. Clone remote release
+# 8... The rest is the same
+
 # Set the debug trace to include line numbers
 export PS4='+ ${LINENO}: '
 
@@ -15,7 +61,6 @@ target_directory=.
 # Check if a directory argument is provided
 if [ $# -eq 1 ]; then
     target_directory=$1
-
     if [ -d "$target_directory" ]; then
         echo "[ERROR] Directory '$target_directory' already exists."
         exit 1
@@ -68,107 +113,84 @@ fi
 # Since this is mainly used on MSYS, I will use the input - "linux on windows" setting. Change it if needed.
 core_autocrlf=input
 
-# Option 1 - THIS
-# 1. Create all local repos (and fill them with demo commits)
-# 2. Add them as submodules of each other
-# 3. Create bare remote repos
-# 4. Add remotes to local repos
-# 5. Push branches and tags to all remotes
-# 6. Delete local repos and clone remote release ...
-
-# Option 2
-# 1. Create bare repos on both origin and github remote locations
-# 2. Clone origin remote repos to local and add github remote
-# 3. Fill them with demo commits
-# 4. Add them as submodules of each other
-# 5. Push branches and tags to all remotes
-# 6. Delete local repos and clone remote release ...
-
 function create_git_repo() {
     path=$1
     git init "$path"
     cd "$path" || exit
     git config --local core.autocrlf $core_autocrlf
-    touch README
+    git checkout -b main
+    echo "$path" > README
     echo "* text=auto" > .gitattributes
     git add -A
-    git checkout -b main
-    git commit -am "Initial commit"
-    git branch develop
+    git commit -m "Initial commit"
     cd - || exit
 }
 
-# Create all repos
+# Create all repos, local and remote
 for repo in release safe user shared blackchannel simulink; do
+    # Init bare repo. Note .git for a bare repo is a convention
+    git init --bare "$remote_origin_dir/$repo.git"
+    git init --bare "$remote_github_dir/$repo.git"
+    # Create local repo
     create_git_repo "$local_dir/$repo"
+    # Add remotes
+    cd "$local_dir/$repo"
+    git remote add origin "$remote_origin_dir/$repo.git"
+    git remote add github "$remote_github_dir/$repo.git"
+    # Push to remotes (otherwise the submodule add won't work since they won't be on remote)
+    git push origin main
+    git push github main
+    cd -
 done
 
 # Add submodules to projects
+# safe
 cd "$local_dir/safe" || exit
-git -c protocol.file.allow=always submodule add ../shared submodules/shared
-git -c protocol.file.allow=always submodule add ../blackchannel submodules/blackchannel
-git commit -am "Add submodules"
+git -c protocol.file.allow=always submodule add -b main ../shared submodules/shared
+git -c protocol.file.allow=always submodule add -b main ../blackchannel submodules/blackchannel
+git add -A
+git commit -m "Add submodules"
+# Push to remotes
+git push origin --all
+git push github --all
 
+# user
 cd "$local_dir/user" || exit
-git -c protocol.file.allow=always submodule add ../shared submodules/shared
-git -c protocol.file.allow=always submodule add ../simulink submodules/simulink
-git commit -am "Add submodules"
+git -c protocol.file.allow=always submodule add -b main  ../shared submodules/shared
+git -c protocol.file.allow=always submodule add -b main ../simulink submodules/simulink
+git add -A
+git commit -m "Add submodules"
+# Push to remotes
+git push origin --all
+git push github --all
 
+# release
 cd "$local_dir/release" || exit
-git -c protocol.file.allow=always submodule add ../safe safe
-git -c protocol.file.allow=always submodule add ../user user
-git commit -am "Add submodules"
-
-# Create bare repos for remotes
-for repo in "$local_dir"/*/; do
-    # Get the base name of the local repository (remove trailing slash)
-    repo_name=$(basename "$repo")
-    # Create a bare repo with the same name in the remote directory
-    git init --bare "$remote_origin_dir/$repo_name.git"
-    git init --bare "$remote_github_dir/$repo_name.git"
-done
-
-# Add remotes
-for path in "$local_dir"/*/; do
-    cd "$path" || exit
-    git remote add origin "$remote_origin_dir/$(basename "$path").git"
-    git remote add github "$remote_github_dir/$(basename "$path").git"
-    cd - || exit
-done
-
-# Push branches and tags
-for dir in "$local_dir"/*/; do
-    cd "$dir" || exit
-    git push origin main
-    git push origin develop
-    git push github main
-    git push github develop
-    cd - || exit
-done
-
-# Tagging specific repos
-cd "$local_dir/safe" || exit
-git tag v0.8.0
-git push --tags
-
-cd "$local_dir/user" || exit
-git tag v1.0.0
-git push --tags
+git -c protocol.file.allow=always submodule add -b main ../safe safe # Since the release repo has remote configured it will go to remote (HEAD commit) to get the submodules, so the above commits would not be included here in release's safe and user, if we hadn't pushed them to remotes. I added -b main since WSL fails with fatal: You are on a branch yet to be born, it seems to choose master as the default branch, but repo only has main
+git -c protocol.file.allow=always submodule add -b main ../user user
+git add -A
+git commit -m "Add submodules"
+# Push to remotes
+git push origin --all
+git push github --all
 
 # Delete all local repos
 cd "$local_dir" || exit
-if [ -d "$local_dir/release" ]; then
-    rm -rf release safe user shared blackchannel simulink
+if [ -d "release" ]; then
+    rm -rf release safe user shared blackchannel simulink # Note: running this from a terminal in VSCode can fail. It seems some vscode git stuff locks some directories some of the time. Actually even from a standalone e.g. MSYS terminal it failed, since I had vscode open.
 else
     echo "Error: Expected directories not found, aborting deletion."
     exit 1
 fi
 
 # Clone release
-git clone "$remote_origin_dir/release"
+git clone -b main "$remote_dir/origin/release" # Again I added -b main since WSL fails with warning: remote HEAD refers to nonexistent ref, unable to checkout.
 cd release || exit
 
-# Set autocrlf for all
+# Update all submodules
+git -c protocol.file.allow=always submodule update --init --recursive
+
+# Set all autocrlf
 git config --local core.autocrlf $core_autocrlf
 git submodule foreach --recursive "git config --local core.autocrlf $core_autocrlf"
 
@@ -177,12 +199,9 @@ git remote add github "$remote_github_dir/release"
 export REMOTE_GITHUB_DIR=$remote_github_dir # if not exported git submodule foreach in '' doesn't see our local variable
 git submodule foreach --recursive 'git remote add github $REMOTE_GITHUB_DIR/$(basename $path)' # Note single quotes '' are needed here to avoid expansion of expressions ($REMOTE_GITHUB_DIR and $path), but instead keep the whole command/string literal/as is. NOTE In the context of git submodule foreach, $path will be set by git to the path of each submodule.
 
-# Update all submodules
-git -c protocol.file.allow=always submodule update --init --recursive
-
-# Fetch all
-git -c protocol.file.allow=always fetch --all
-git submodule foreach --recursive 'git -c protocol.file.allow=always fetch --all'
+# Fetch all (to get the branches from github remote)
+git fetch --all
+git submodule foreach --recursive 'git -c protocol.file.allow=always  fetch --all'
 
 # Additional steps (commits, tags)
 read -n 1 -r -p "Make additional commits and tags to simulate changes [Y/n]? "
@@ -192,10 +211,11 @@ if [[ ! $REPLY =~ [Nn] ]]; then
     (
         echo "[INFO] Working on safe/shared..."
         cd safe/submodules/shared
-        git checkout main
+        git checkout -B main # Create the branch if it doesn't exist or reset it to the current commit if it does
         echo "Some shared stuff" > shared.c
         git add shared.c
         git commit -am "Add shared.c"
+        git tag v1.0.0
         git checkout -b develop main
         echo "Some shared develop stuff" >> shared.c
         git add shared.c
@@ -209,7 +229,7 @@ if [[ ! $REPLY =~ [Nn] ]]; then
     (
         echo "[INFO] Working on safe..."
         cd safe || exit
-        git checkout main
+        git checkout -B main # Create the branch if it doesn't exist or reset it to the current commit if it does
         echo "Some safe stuff" > safe.c
         git add safe.c
         git commit -m "Add safe.c"
@@ -229,7 +249,7 @@ if [[ ! $REPLY =~ [Nn] ]]; then
     (
         echo "[INFO] Working on user/simulink..."
         cd user/submodules/simulink
-        git checkout main
+        git checkout -B main # Create the branch if it doesn't exist or reset it to the current commit if it does
         echo "Some simulink stuff" > simulink.c
         git add simulink.c
         git commit -m "Add simulink.c"
@@ -246,7 +266,7 @@ if [[ ! $REPLY =~ [Nn] ]]; then
     (
         echo "[INFO] Working on user..."
         cd user
-        git checkout main
+        git checkout -B main # Create the branch if it doesn't exist or reset it to the current commit if it does
         echo "Some user stuff" > user.c
         git add user.c
         git commit -m "Add user.c"
@@ -265,7 +285,7 @@ if [[ ! $REPLY =~ [Nn] ]]; then
     # release
     (
         echo "[INFO] Working on release..."
-        git checkout main
+        git checkout -B main # Create the branch if it doesn't exist or reset it to the current commit if it does
         echo "#!/bin/bash" > release.sh
         git add release.sh
         git commit -m "Add release.sh"
@@ -282,4 +302,4 @@ if [[ ! $REPLY =~ [Nn] ]]; then
 fi
 
 echo "Git playground setup finished"
-echo "Log file $log_file"
+echo "Log file $base_dir/$log_file"
