@@ -40,7 +40,7 @@ cd "$target_directory" || exit
 # Save the absolute location of the target directory
 absolute_target_directory=$(realpath "$PWD")
 
-function git_push_branches_tags_to_remotes() {
+git_push() {
     remotes=(github origin)
     branches=(develop master main)
     exclusions=("simulink")
@@ -66,7 +66,7 @@ function git_push_branches_tags_to_remotes() {
                 echo "[INFO] Pushing ${remote}/${branch}"
                 # If push fails that is not necessarily an error since a submodule of one project can be on a different
                 # branch and be behind the other one that was already pushed, but that is not an error.
-                if ! git -c protocol.file.allow=always push "$remote" "$branch"; then
+                if ! git push "$remote" "$branch"; then
                     echo "[WARNING] Failed to push $remote/$branch on $relative_path"
                 fi
             else
@@ -75,11 +75,11 @@ function git_push_branches_tags_to_remotes() {
         done
 
         # Push tags
-        git -c protocol.file.allow=always push "$remote" --tags
+        git push "$remote" --tags
     done
 }
 
-push_branches_tags_to_all_submodules_in_reverse_order() {
+git_push_submodules_in_reverse() {
     # Get the list of submodule paths in reverse order, removing 'Entering ' prefix and quotes
     submodule_paths=$(git submodule foreach --recursive | tac | sed -e 's/Entering //' -e "s/'//g")
 
@@ -87,24 +87,24 @@ push_branches_tags_to_all_submodules_in_reverse_order() {
     while IFS= read -r submodule_path; do
     (
         cd "$submodule_path" || exit
-        git_push_branches_tags_to_remotes
+        git_push
     )
     done <<< "$submodule_paths"
 }
 
 # Fetch all
 echo "[INFO] Fetching all."
-git -c protocol.file.allow=always fetch --all
+git fetch --all
 git submodule foreach --recursive 'git -c protocol.file.allow=always fetch --all'
 
 # Push branches and tags for all submodules but do it in reverse order since I think that if you try to push
 # a branch and the submodules aren't pushed the push will fail. Although it seems to not fail at least not
 # on local filesystem, git daemon, gitea, github, maybe on gitlab?
 echo "[INFO] Push submodules in reverse order!"
-push_branches_tags_to_all_submodules_in_reverse_order
+git_push_submodules_in_reverse
 
 # Now also push the main repo after all the submodules have been pushed
 echo "[INFO] Push main repository."
-git_push_branches_tags_to_remotes
+git_push
 
 echo "[INFO] Done."
