@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Set the debug trace to include line numbers
+export PS4='+ ${LINENO}: '
+
 # https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html
 set -x # Print a trace of simple commands, for commands, case commands, select commands, and arithmetic for commands and their arguments or associated word lists after they are expanded and before they are executed.
 set -e # Exit immediately if a pipeline (see Pipelines), which may consist of a single simple command (see Simple Commands), a list (see Lists of Commands), or a compound command (see Compound Commands) returns a non-zero status.
@@ -34,19 +37,21 @@ remote_dirname="remote"
 base_dir=$PWD
 local_dir=$base_dir/$project_dirname
 remote_dir=$base_dir/$remote_dirname
+remote_origin_dir="${remote_dir}/origin"
+remote_github_dir="${remote_dir}/github"
 
 # Create necessary directories
 if [ -d "$local_dir" ]; then
     echo "[ERROR] Directory '$local_dir' already exists."
     exit 1
-elif [ -d "$remote_dir/origin" ]; then
-    echo "[ERROR] Directory '$remote_dir/origin' already exists."
+elif [ -d "$remote_origin_dir" ]; then
+    echo "[ERROR] Directory '$remote_origin_dir' already exists."
     exit 1
-elif [ -d "$remote_dir/github" ]; then
-    echo "[ERROR] Directory '$remote_dir/github' already exists."
+elif [ -d "$remote_github_dir" ]; then
+    echo "[ERROR] Directory '$remote_github_dir' already exists."
     exit 1
 else
-    mkdir -p "$local_dir" "$remote_dir/origin" "$remote_dir/github"
+    mkdir -p "$local_dir" "$remote_origin_dir" "$remote_github_dir"
 fi
 
 # Define what we will use for autocrlf
@@ -63,10 +68,26 @@ fi
 # Since this is mainly used on MSYS, I will use the input - "linux on windows" setting. Change it if needed.
 core_autocrlf=input
 
+# Option 1 - THIS
+# 1. Create all local repos (and fill them with demo commits)
+# 2. Add them as submodules of each other
+# 3. Create bare remote repos
+# 4. Add remotes to local repos
+# 5. Push branches and tags to all remotes
+# 6. Delete local repos and clone remote release ...
+
+# Option 2
+# 1. Create bare repos on both origin and github remote locations
+# 2. Clone origin remote repos to local and add github remote
+# 3. Fill them with demo commits
+# 4. Add them as submodules of each other
+# 5. Push branches and tags to all remotes
+# 6. Delete local repos and clone remote release ...
+
 function create_git_repo() {
-    dir=$1
-    git init "$dir"
-    cd "$dir" || exit
+    path=$1
+    git init "$path"
+    cd "$path" || exit
     git config --local core.autocrlf $core_autocrlf
     touch README
     echo "* text=auto" > .gitattributes
@@ -77,20 +98,9 @@ function create_git_repo() {
     cd - || exit
 }
 
-# Create repos for each project
-for dir in release safe user shared blackchannel simulink; do
-    create_git_repo "$local_dir/$dir"
-done
-
-# Create bare repos for remotes
-cd "$remote_dir/origin"  || exit
-for dir in "$local_dir"/*/; do
-    git -c protocol.file.allow=always clone --bare "$dir"
-done
-
-cd "$remote_dir/github" || exit
-for dir in "$local_dir"/*/; do
-    git -c protocol.file.allow=always clone --bare "$dir"
+# Create all repos
+for repo in release safe user shared blackchannel simulink; do
+    create_git_repo "$local_dir/$repo"
 done
 
 # Add submodules to projects
@@ -109,17 +119,21 @@ git -c protocol.file.allow=always submodule add ../safe safe
 git -c protocol.file.allow=always submodule add ../user user
 git commit -am "Add submodules"
 
-# Add remotes
-function add_remotes() {
-    dir=$1
-    cd "$dir" || exit
-    git remote add origin "$remote_dir/origin/$(basename "$dir").git"
-    git remote add github "$remote_dir/github/$(basename "$dir").git"
-    cd - || exit
-}
+# Create bare repos for remotes
+for repo in "$local_dir"/*/; do
+    # Get the base name of the local repository (remove trailing slash)
+    repo_name=$(basename "$repo")
+    # Create a bare repo with the same name in the remote directory
+    git init --bare "$remote_origin_dir/$repo_name.git"
+    git init --bare "$remote_github_dir/$repo_name.git"
+done
 
-for dir in "$local_dir"/*/; do
-    add_remotes "$dir"
+# Add remotes
+for path in "$local_dir"/*/; do
+    cd "$path" || exit
+    git remote add origin "$remote_origin_dir/$(basename "$path").git"
+    git remote add github "$remote_github_dir/$(basename "$path").git"
+    cd - || exit
 done
 
 # Push branches and tags
@@ -141,7 +155,7 @@ cd "$local_dir/user" || exit
 git tag v1.0.0
 git push --tags
 
-# Clean up local repos
+# Delete all local repos
 cd "$local_dir" || exit
 if [ -d "$local_dir/release" ]; then
     rm -rf release safe user shared blackchannel simulink
@@ -151,29 +165,28 @@ else
 fi
 
 # Clone release
-git -c protocol.file.allow=always clone "$remote_dir/origin/release"
+git clone "$remote_origin_dir/release"
 cd release || exit
 
-# Update all submodules
-git -c protocol.file.allow=always submodule update --init --recursive
-
-# Set all autocrlf
+# Set autocrlf for all
 git config --local core.autocrlf $core_autocrlf
 git submodule foreach --recursive "git config --local core.autocrlf $core_autocrlf"
 
 # Add github remote to all repos
-git remote add github "$remote_dir/github/release"
-export REMOTE_DIR=$remote_dir # if not exported git submodule foreach in '' doesn't see our local variable
-git submodule foreach --recursive 'git remote add github $REMOTE_DIR/github/$(basename $path)' # Note single quotes '' are needed here to avoid expansion of expressions ($REMOTE_DIR and $path), but instead keep the whole command/string literal/as is. NOTE In the context of git submodule foreach, $path will be set by git to the path of each submodule.
+git remote add github "$remote_github_dir/release"
+export REMOTE_GITHUB_DIR=$remote_github_dir # if not exported git submodule foreach in '' doesn't see our local variable
+git submodule foreach --recursive 'git remote add github $REMOTE_GITHUB_DIR/$(basename $path)' # Note single quotes '' are needed here to avoid expansion of expressions ($REMOTE_GITHUB_DIR and $path), but instead keep the whole command/string literal/as is. NOTE In the context of git submodule foreach, $path will be set by git to the path of each submodule.
+
+# Update all submodules
+git -c protocol.file.allow=always submodule update --init --recursive
 
 # Fetch all
 git -c protocol.file.allow=always fetch --all
 git submodule foreach --recursive 'git -c protocol.file.allow=always fetch --all'
 
-# Additional steps (commits)
-read -n 1 -r -p "Make commits to main and develop to have something to push to remotes [Y/n]? "
+# Additional steps (commits, tags)
+read -n 1 -r -p "Make additional commits and tags to simulate changes [Y/n]? "
 if [[ ! $REPLY =~ [Nn] ]]; then
-    echo "Adding commits to simulate changes..."
 
     # safe/shared
     (
