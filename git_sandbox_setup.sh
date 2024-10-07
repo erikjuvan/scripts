@@ -13,7 +13,7 @@
 
 # Following are some options of steps variants. I've spent like 5 days messing with this sh**stuff.
 #
-# Option 1
+# Option 1 - THIS
 # 1. Create local repos
 # 2. Add submodules
 # 3. Create bare remotes
@@ -23,7 +23,7 @@
 # 7. Clone remote release
 # 8... The rest is the same
 #
-# Option 2 - THIS
+# Option 2
 # 1. Create bare remotes
 # 2. Create local repos
 # 3. Add remotes
@@ -128,19 +128,8 @@ function create_git_repo() {
 
 # Create all repos, local and remote
 for repo in release safe user shared blackchannel simulink; do
-    # Init bare repo. Note .git for a bare repo is a convention
-    git init --bare "$remote_origin_dir/$repo.git"
-    git init --bare "$remote_github_dir/$repo.git"
     # Create local repo
     create_git_repo "$local_dir/$repo"
-    # Add remotes
-    cd "$local_dir/$repo"
-    git remote add origin "$remote_origin_dir/$repo.git"
-    git remote add github "$remote_github_dir/$repo.git"
-    # Push to remotes (otherwise the submodule add won't work since they won't be on remote)
-    git push origin main
-    git push github main
-    cd -
 done
 
 # Add submodules to projects
@@ -150,9 +139,6 @@ git -c protocol.file.allow=always submodule add -b main ../shared submodules/sha
 git -c protocol.file.allow=always submodule add -b main ../blackchannel submodules/blackchannel
 git add -A
 git commit -m "Add submodules"
-# Push to remotes
-git push origin --all
-git push github --all
 
 # user
 cd "$local_dir/user" || exit
@@ -160,9 +146,6 @@ git -c protocol.file.allow=always submodule add -b main  ../shared submodules/sh
 git -c protocol.file.allow=always submodule add -b main ../simulink submodules/simulink
 git add -A
 git commit -m "Add submodules"
-# Push to remotes
-git push origin --all
-git push github --all
 
 # release
 cd "$local_dir/release" || exit
@@ -170,9 +153,23 @@ git -c protocol.file.allow=always submodule add -b main ../safe safe # Since the
 git -c protocol.file.allow=always submodule add -b main ../user user
 git add -A
 git commit -m "Add submodules"
-# Push to remotes
-git push origin --all
-git push github --all
+
+# Create remotes and push to them
+for repo in "$local_dir"/*/; do
+    # Get the base name of the local repository (remove trailing slash)
+    repo_name=$(basename "$repo")
+    # Init bare repo. Note .git for a bare repo is a convention
+    git init --bare "$remote_origin_dir/$repo_name.git"
+    git init --bare "$remote_github_dir/$repo_name.git"
+    # Add remotes
+    cd "$repo" || exit
+    git remote add origin "$remote_origin_dir/$repo_name.git"
+    git remote add github "$remote_github_dir/$repo_name.git"
+    # Push to remotes (otherwise the submodule add won't work since they won't be on remote)
+    git push origin main
+    git push github main
+    cd -
+done
 
 # Delete all local repos
 cd "$local_dir" || exit
