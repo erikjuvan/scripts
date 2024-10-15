@@ -4,3 +4,4 @@
 !README.md
 !push_branches_tags_to_remotes.sh
 !git_sandbox_setup.sh
+!functions.sh
