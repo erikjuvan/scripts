@@ -6,12 +6,9 @@
 # To use this script with the demo git playground set up by setupt_demo_git_projects.sh
 # add -c protocol.file.allow=always to git commands that cause issue with error 'fatal: transport 'file' not allowed'
 
-# Set the debug trace to include line numbers
-export PS4='+ ${LINENO}: '
+source functions.sh
 
-# https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html
-set -x # Print a trace of simple commands, for commands, case commands, select commands, and arithmetic for commands and their arguments or associated word lists after they are expanded and before they are executed.
-set -e # Exit immediately if a pipeline (see Pipelines), which may consist of a single simple command (see Simple Commands), a list (see Lists of Commands), or a compound command (see Compound Commands) returns a non-zero status.
+init
 
 # Log the process to a temporary log file which will get moved on EXIT trap set up down below.
 # We are logging to a temporary file because I want the log file to reside in the target_directory.
@@ -37,11 +34,16 @@ fi
 # Change the working directory to the provided directory
 cd "$target_directory" || exit
 
+# Check if we are in a Git repository
+if ! on_git_repo_root; then
+    exit 1
+fi
+
 # Save the absolute location of the target directory
 absolute_target_directory=$(realpath "$PWD")
 
 git_push() {
-    remotes=(github origin)
+    remotes=$(git remote)
     branches=(develop master main)
     exclusions=("simulink")
 
@@ -58,7 +60,7 @@ git_push() {
 
     echo "[INFO] Repository: '$relative_path'"
 
-    for remote in "${remotes[@]}" ; do
+    for remote in $remotes; do
         # Push branches
         for branch in "${branches[@]}" ; do
             # if branch exists

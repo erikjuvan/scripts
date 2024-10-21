@@ -373,3 +373,22 @@ git_generate_complete_diff() {
 #
 #     rm -f safe.diff user.diff
 # }
+
+on_git_repo_root() {
+    # Check if we are in a Git repository
+    if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+        log_message ERROR "Not in a Git repository."
+        return 1
+    fi
+
+    # Get the top-level directory of the Git repo
+    repo_root=$(git rev-parse --show-toplevel)
+
+    # Compare it to the current working directory
+    if [ "$repo_root" != "$PWD" ]; then
+        log_message ERROR "Not in the root of the Git repository."
+        return 1
+    fi
+
+    return 0
+}
