@@ -105,9 +105,11 @@ log_message() {
 }
 
 # Function to print summary of log messages
+# $1 - exit status
 log_summary() {
+    local exit_status=${1:-69}
     # Get the name of the script that sourced this file
-    local parent_script="${BASH_SOURCE[1]}"
+    local parent_script="${BASH_SOURCE[-1]}" # it was [1] but it didn't work correctly
     log_message INFO "=== Log summary for $parent_script ==="
     if [ "$_set_x_enabled" == true ]; then
         set +x # disable for the duration of this function
@@ -117,11 +119,21 @@ log_summary() {
         log_message INFO "${level}s: ${_log_counts[$level]}  "
     done
 
-    if [[ -n $_log_file_full_path ]]; then
+    if [[ -n "$_log_file_full_path" ]]; then
         log_message INFO "Log file $_log_file_full_path"
     fi
 
     log_message INFO "Finished in $SECONDS seconds."
+
+    if [ "$exit_status" -eq 0 ]; then
+        log_message INFO "SUCCESS"
+    elif [ "$exit_status" -eq 69 ]; then
+        log_message WARNING "UNKNOWN exit status"
+    else
+        log_message INFO "FAILED"
+    fi
+
+    log_message INFO "==========================="
 
     if [ "$_set_x_enabled" == true ]; then
         set -x # enable back
@@ -260,17 +272,26 @@ git_is_clean() {
 # This function returns the current git branch
 git_get_current_branch() {
     # Check if we are in a Git repository
-    if ! git rev-parse --is-inside-work-tree &>/dev/null; then # &>/dev/null redirect both stdout and stderr to /dev/null
-        log_message ERROR "Not in a Git repository." >&2 # send to stderr
+    if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+        log_message ERROR "Not in a Git repository." >&2  # Log to stderr
         return 1  # Return an error status
     fi
 
-    # Get the current branch name
+    # Get the current branch or detect detached HEAD
     local current_branch
-    current_branch=$(git rev-parse --abbrev-ref HEAD)
+    if ! current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null); then
+        log_message ERROR "Failed to retrieve the current branch." >&2
+        return 1  # Return error if git rev-parse fails
+    fi
 
-    # Return current branch name
-    echo "$current_branch"
+    # Check if in detached HEAD state
+    if [[ "$current_branch" == "HEAD" ]]; then
+        log_message WARNING "Repository is in a detached HEAD state." >&2
+        echo "DETACHED-HEAD"
+    else
+        # Return the current branch name
+        echo "$current_branch"
+    fi
 }
 
 # Too much work, only here as a reference, much better to use
@@ -278,7 +299,7 @@ git_get_current_branch() {
 # $1 - path to run the command on
 git_generate_diff_by_hand() {
     local path=$1
-    cd "$path" || exit
+    cd "$path" || exit 1
     # File to store the diff
     local diff_file="changes.diff"
     local diff_path=
@@ -296,7 +317,7 @@ git_generate_diff_by_hand() {
         local changes
 
         # Move into the submodule directory
-        cd "$path" || exit
+        cd "$path" || exit 1
 
         # Check for changes in the current submodule
         changes=$(git diff HEAD)
@@ -313,7 +334,7 @@ git_generate_diff_by_hand() {
         fi
 
         # Move back to the original directory
-        cd - > /dev/null || exit
+        cd - > /dev/null || exit 1
     }
 
     # Check main repo
@@ -373,6 +394,20 @@ git_generate_complete_diff() {
 #
 #     rm -f safe.diff user.diff
 # }
+
+# This is just to show how checking is script is being source is done.
+# Don't call this function since this script is always meant to be sourced
+# and this will always return that it's being sourced.
+am_i_sourced() {
+    # Detect if a script is being sourced
+    if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+        echo "Script is being sourced BASH_SOURCE[0]:${BASH_SOURCE[0]} \${0}:${0}"
+        return 0
+    else
+        echo "Script is being executed BASH_SOURCE[0]:${BASH_SOURCE[0]} \${0}:${0}"
+        return 1
+    fi
+}
 
 on_git_repo_root() {
     # Check if we are in a Git repository
