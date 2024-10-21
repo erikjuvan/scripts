@@ -6,24 +6,28 @@
 # To use this script with the demo git playground set up by setupt_demo_git_projects.sh
 # add -c protocol.file.allow=always to git commands that cause issue with error 'fatal: transport 'file' not allowed'
 
+# Move to script folder so it can source functions.sh
+script_dir=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+cd "$script_dir" || exit
+
+# Source functions
+if [[ ! -f functions.sh ]]; then
+    echo "Error: functions.sh not found."
+    exit 1
+fi
 source functions.sh
 
-init
+# Return to the directory from which the script was called.
+# This allows us to call the script from a remote dir and point to the directory from there.
+cd - &> /dev/null || exit
 
-# Log the process to a temporary log file which will get moved on EXIT trap set up down below.
-# We are logging to a temporary file because I want the log file to reside in the target_directory.
-# But if I directly place it there the repo gets dirty, so instead it is placed in a tmp/ folder
-# and on EXIT trap gets copied over. EDIT: This is not necessary anymore since I removed
-# the check for a dirty git repo because I'm no longer switching between branches, but I'll leave it
-# anyway as an example of how it can be done, since it's not really hurting anything.
-temp_log_file=$(mktemp)
-exec > >(tee "$temp_log_file") 2>&1 # Redirect stdout (1) and stderr (2) to both the terminal and the log file
+init setx
 
-# Log date
-date
-
-# The EXIT trap will ensure that, regardless of how the script ends, the temporary log file will be moved to the desired location. This way, we won't lose the log even if an error occurs.
-trap 'final_log_file="${absolute_target_directory}/push.log"; mv "$temp_log_file" "$final_log_file"; echo "[INFO] Log file $final_log_file"' EXIT
+# EXIT trap
+trap '
+exit_status="$?"
+log_summary "$exit_status"
+' EXIT
 
 # Move to a target directory if one is provided
 target_directory=.
@@ -42,10 +46,12 @@ fi
 # Save the absolute location of the target directory
 absolute_target_directory=$(realpath "$PWD")
 
+log_to_file_also "$absolute_target_directory/push_logs" "push"
+
 git_push() {
     remotes=$(git remote)
     branches=(develop master main)
-    exclusions=("simulink")
+    exclusions=() # Had simulink, but will instead push everything.
 
     relative_path=$(realpath -s --relative-to="$absolute_target_directory" "$PWD")
     repo_name=$(basename "$relative_path")
@@ -53,26 +59,26 @@ git_push() {
     # Check if the repository name contains any of the exclusions
     for exclusion in "${exclusions[@]}"; do
         if [[ "$repo_name" == *"$exclusion"* ]]; then
-            echo "[INFO] Repository '$relative_path' is excluded. Skipping..."
+            log_message INFO "Repository '$relative_path' is excluded. Skipping..."
             return
         fi
     done
 
-    echo "[INFO] Repository: '$relative_path'"
+    log_message INFO "Repository: '$relative_path'"
 
     for remote in $remotes; do
         # Push branches
         for branch in "${branches[@]}" ; do
             # if branch exists
             if git show-ref --verify --quiet "refs/heads/$branch"; then
-                echo "[INFO] Pushing ${remote}/${branch}"
+                log_message INFO "Pushing ${remote}/${branch}"
                 # If push fails that is not necessarily an error since a submodule of one project can be on a different
                 # branch and be behind the other one that was already pushed, but that is not an error.
                 if ! git push "$remote" "$branch"; then
-                    echo "[WARNING] Failed to push $remote/$branch on $relative_path"
+                    log_message WARNING "Failed to push $remote/$branch on $relative_path"
                 fi
             else
-                echo "[INFO] Branch '$branch' does not exist. Skipping..."
+                log_message INFO "Branch '$branch' does not exist. Skipping..."
             fi
         done
 
@@ -95,18 +101,18 @@ git_push_submodules_in_reverse() {
 }
 
 # Fetch all
-echo "[INFO] Fetching all."
+log_message INFO "Fetching all."
 git fetch --all
 git submodule foreach --recursive 'git -c protocol.file.allow=always fetch --all'
 
 # Push branches and tags for all submodules but do it in reverse order since I think that if you try to push
 # a branch and the submodules aren't pushed the push will fail. Although it seems to not fail at least not
 # on local filesystem, git daemon, gitea, github, maybe on gitlab?
-echo "[INFO] Push submodules in reverse order!"
+log_message INFO "Push submodules in reverse order!"
 git_push_submodules_in_reverse
 
 # Now also push the main repo after all the submodules have been pushed
-echo "[INFO] Push main repository."
+log_message INFO "Push main repository."
 git_push
 
-echo "[INFO] Done."
+log_message INFO "Done."
